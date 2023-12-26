@@ -8,6 +8,7 @@ import (
 	"log"
 	"net"
 	"os"
+	"os/exec"
 	"os/signal"
 	"strings"
 	"syscall"
@@ -19,12 +20,14 @@ import (
 
 var (
 	enableDNSLookup = true // Default is set to enable DNS lookup
-	upstreamDNS     string // Variable to hold the upstream DNS server address
+	localDNS        string // Variable to hold the local DNS server address
+	upstreamDNS     string // Variable to hold the upstream DNS server
 	useGUI          bool   // Variable to determine GUI mode
 )
 
 func init() {
-	flag.StringVar(&upstreamDNS, "dns", "8.8.8.8", "Specify the upstream DNS server")
+	flag.StringVar(&localDNS, "dns", "127.0.0.1", "Specify the local DNS server")
+	flag.StringVar(&upstreamDNS, "udns", "8.8.8.8", "Specify the upstream DNS server")
 	flag.BoolVar(&useGUI, "gui", false, "Run the application with GUI")
 	flag.Parse()
 }
@@ -45,6 +48,12 @@ func main() {
 
 	// Create a DNS server listening on UDP port 53
 	dnsServer := &dns.Server{Addr: ":53", Net: "udp"}
+
+	// Change DNS settings
+	//if err := setDNS(localDNS); err != nil {
+	//	fmt.Println(err)
+	//	return
+	//}
 
 	go handleUserInput(database)
 
@@ -77,7 +86,6 @@ func main() {
 						response.Answer = append(response.Answer, &answerRecord)
 					}
 				} else {
-					// If not found, perform DNS resolution and store in the database
 					resolvedIP, err := dbfunc.ResolveAndStore(database, strings.ToLower(question.Name))
 					if err != nil {
 						log.Printf("Error resolving and storing: %s\n", err)
@@ -161,4 +169,22 @@ func handleUserInput(db *sql.DB) {
 			fmt.Println("Invalid command. Try again.")
 		}
 	}
+}
+
+func setDNS(serverIP string) error {
+	cmd := exec.Command("netsh", "interface", "ipv4", "set", "dns", "name=Ethernet", "static", serverIP)
+	err := cmd.Run()
+	if err != nil {
+		return fmt.Errorf("error setting DNS: %s", err)
+	}
+	return nil
+}
+
+func revertDNS() error {
+	cmd := exec.Command("netsh", "interface", "ipv4", "set", "dns", "name=Ethernet", "dhcp")
+	err := cmd.Run()
+	if err != nil {
+		return fmt.Errorf("error reverting DNS: %s", err)
+	}
+	return nil
 }
