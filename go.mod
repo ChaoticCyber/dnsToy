@@ -1,4 +1,4 @@
-module github.com/chaoticcyber/gotest
+module github.com/chaoticcyber/dnsToy
 
 go 1.21.5
 
