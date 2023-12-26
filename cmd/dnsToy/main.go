@@ -11,6 +11,7 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/chaoticcyber/dnsToy/internal/dbfunc"
 	_ "github.com/mattn/go-sqlite3"
 	"github.com/miekg/dns"
 )
@@ -65,7 +66,7 @@ func main() {
 				}
 
 				// Perform database update with the client's IP address
-				exists, err := existsInDatabaseIncrementCount(database, strings.ToLower(question.Name), resolvedIP)
+				exists, err := dbfunc.ExistsInDatabaseIncrementCount(database, strings.ToLower(question.Name), resolvedIP)
 				if err != nil {
 					log.Printf("Error checking database or incrementing count for %s: %s\n", question.Name, err)
 					continue
@@ -78,7 +79,7 @@ func main() {
 				}
 
 				// Check if the queried domain exists in the resolutions database
-				if resolvedIP, found := getFromDatabase(database, strings.ToLower(question.Name)); found {
+				if resolvedIP, found := dbfunc.GetFromDatabase(database, strings.ToLower(question.Name)); found {
 					// If found in resolutions, reply with the resolved IP
 					ip := net.ParseIP(resolvedIP)
 					if ip != nil {
@@ -91,7 +92,7 @@ func main() {
 					}
 				} else {
 					// If not found, perform DNS resolution and store in the database
-					resolvedIP, err := resolveAndStore(database, strings.ToLower(question.Name))
+					resolvedIP, err := dbfunc.ResolveAndStore(database, strings.ToLower(question.Name))
 					if err != nil {
 						log.Printf("Error resolving and storing: %s\n", err)
 						continue
@@ -108,7 +109,7 @@ func main() {
 			}
 			if !enableDNSLookup {
 				// If DNS lookup is disabled, check if domain exists in the database
-				if resolvedIP, found := getFromDatabase(database, strings.ToLower(question.Name)); found {
+				if resolvedIP, found := dbfunc.GetFromDatabase(database, strings.ToLower(question.Name)); found {
 					// If found in resolutions, reply with the resolved IP
 					ip := net.ParseIP(resolvedIP)
 					if ip != nil {
@@ -157,7 +158,7 @@ func handleUserInput(db *sql.DB) {
 
 		switch text {
 		case "dump":
-			err := dumpDatabase(db)
+			err := dbfunc.DumpDatabase(db)
 			if err != nil {
 				fmt.Println("Error dumping database:", err)
 			}

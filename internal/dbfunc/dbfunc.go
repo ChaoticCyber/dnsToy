@@ -10,7 +10,7 @@ import (
 )
 
 // Function to query the database for domain resolution
-func getFromDatabase(db *sql.DB, domain string) (string, bool) {
+func GetFromDatabase(db *sql.DB, domain string) (string, bool) {
 	var resolvedIP string
 	err := db.QueryRow("SELECT ip FROM resolutions WHERE domain=?", domain).Scan(&resolvedIP)
 	if err != nil {
@@ -24,7 +24,7 @@ func getFromDatabase(db *sql.DB, domain string) (string, bool) {
 }
 
 // Function to perform DNS resolution and store in the database
-func resolveAndStore(db *sql.DB, domain string) (net.IP, error) {
+func ResolveAndStore(db *sql.DB, domain string) (net.IP, error) {
 	resolvedIPs, err := net.LookupIP(domain)
 	if err != nil {
 		return nil, err
@@ -38,7 +38,7 @@ func resolveAndStore(db *sql.DB, domain string) (net.IP, error) {
 	resolvedIP := resolvedIPs[0]
 
 	// Store the resolved IP in the database
-	err = addToDatabase(db, domain, resolvedIP.String())
+	err = AddToDatabase(db, domain, resolvedIP.String())
 	if err != nil {
 		return nil, err
 	}
@@ -47,13 +47,13 @@ func resolveAndStore(db *sql.DB, domain string) (net.IP, error) {
 }
 
 // Function to add a domain and its resolution to the database
-func addToDatabase(db *sql.DB, domain, ip string) error {
+func AddToDatabase(db *sql.DB, domain, ip string) error {
 	_, err := db.Exec("INSERT INTO resolutions(domain, ip) VALUES(?, ?)", domain, ip)
 	return err
 }
 
 // Function to dump the contents of the database
-func dumpDatabase(db *sql.DB) error {
+func DumpDatabase(db *sql.DB) error {
 	rows, err := db.Query("SELECT domain, ip, query_count FROM resolutions")
 	if err != nil {
 		return err
@@ -78,7 +78,7 @@ func dumpDatabase(db *sql.DB) error {
 }
 
 // Function to check if a domain exists in the database and increment its query count (with IP)
-func existsInDatabaseIncrementCount(db *sql.DB, domain string, ip net.IP) (bool, error) {
+func ExistsInDatabaseIncrementCount(db *sql.DB, domain string, ip net.IP) (bool, error) {
 	var count int
 	err := db.QueryRow("SELECT query_count FROM resolutions WHERE domain=?", domain).Scan(&count)
 	if err != nil {
