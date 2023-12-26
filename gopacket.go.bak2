@@ -1,0 +1,47 @@
+package main
+
+import (
+	"fmt"
+	"log"
+	"os"
+	"os/signal"
+	"syscall"
+
+	"github.com/google/gopacket"
+	"github.com/google/gopacket/pcap"
+)
+
+func main() {
+	// Open a network interface for packet capture
+	handle, err := pcap.OpenLive("Ethernet", 65536, true, pcap.BlockForever)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer handle.Close()
+
+	// Set filter for DNS packets
+	err = handle.SetBPFFilter("udp and port 53")
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// Create a packet source to capture packets
+	packetSource := gopacket.NewPacketSource(handle, handle.LinkType())
+
+	// Start capturing packets
+	fmt.Println("Capturing DNS packets...")
+
+	// Handle captured packets
+	go func() {
+		for packet := range packetSource.Packets() {
+			// Process and log DNS packets here
+			fmt.Println(packet)
+		}
+	}()
+
+	// Wait for interruption to stop capturing (Ctrl+C)
+	c := make(chan os.Signal, 1)
+	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
+	<-c
+	fmt.Println("\nStopping packet capture...")
+}

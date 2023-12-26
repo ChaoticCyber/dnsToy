@@ -1,0 +1,136 @@
+package main
+
+import (
+	"database/sql"
+	"fmt"
+	"log"
+	"net"
+	"os"
+	"os/signal"
+	"strings"
+	"syscall"
+
+	_ "github.com/mattn/go-sqlite3"
+	"github.com/miekg/dns"
+)
+
+func main() {
+	// Open SQLite database
+	db, err := sql.Open("sqlite3", "dns.db")
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer db.Close()
+
+	// Create resolutions table if it doesn't exist
+	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS resolutions (domain TEXT PRIMARY KEY, ip TEXT)`)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// Create a DNS server
+	server := &dns.Server{Addr: ":53", Net: "udp"} // Listen on UDP port 53
+
+	// Handle DNS requests
+	server.Handler = dns.HandlerFunc(func(w dns.ResponseWriter, r *dns.Msg) {
+		m := new(dns.Msg)
+		m.SetReply(r)
+
+		// Log DNS queries and add to database
+		for _, q := range r.Question {
+			fmt.Printf("Received query for %s\n", q.Name)
+
+			// Check if the query exists in resolutions
+			if value, ok := getFromDatabase(db, strings.ToLower(q.Name)); ok {
+				// If found in resolutions, reply with the resolved IP
+				ip := net.ParseIP(value)
+				if ip != nil {
+					rr := dns.A{
+						Hdr: dns.RR_Header{Name: q.Name, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 60},
+						A:   ip,
+					}
+					m.Answer = append(m.Answer, &rr)
+				}
+			} else {
+				// If not found, perform DNS resolution and store in database
+				ip, err := resolveAndStore(db, strings.ToLower(q.Name))
+				if err != nil {
+					log.Printf("Error resolving and storing: %s\n", err)
+					continue
+				}
+				if ip != nil {
+					rr := dns.A{
+						Hdr: dns.RR_Header{Name: q.Name, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 60},
+						A:   ip,
+					}
+					m.Answer = append(m.Answer, &rr)
+				}
+			}
+		}
+
+		// Send the response back to the client
+		err := w.WriteMsg(m)
+		if err != nil {
+			log.Printf("Error writing DNS response: %s\n", err)
+		}
+	})
+
+	// Start the DNS server
+	go func() {
+		fmt.Println("Starting DNS server...")
+		if err := server.ListenAndServe(); err != nil {
+			log.Fatalf("Error starting DNS server: %s\n", err)
+		}
+	}()
+
+	// Wait for interruption to stop the server (Ctrl+C)
+	c := make(chan os.Signal, 1)
+	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
+	<-c
+
+	fmt.Println("\nStopping DNS server...")
+	server.Shutdown()
+}
+
+// Function to query the database for domain resolution
+func getFromDatabase(db *sql.DB, domain string) (string, bool) {
+	var ip string
+	err := db.QueryRow("SELECT ip FROM resolutions WHERE domain=?", domain).Scan(&ip)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return "", false // Domain not found in database
+		}
+		log.Println(err)
+		return "", false
+	}
+	return ip, true // Domain found in database
+}
+
+// Function to perform DNS resolution and store in the database
+func resolveAndStore(db *sql.DB, domain string) (net.IP, error) {
+	ips, err := net.LookupIP(domain)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(ips) == 0 {
+		return nil, fmt.Errorf("no IP addresses found for %s", domain)
+	}
+
+	// Choose the first resolved IP address
+	ip := ips[0]
+
+	// Store in the database
+	err = addToDatabase(db, domain, ip.String())
+	if err != nil {
+		return nil, err
+	}
+
+	return ip, nil
+}
+
+// Function to add a domain and its resolution to the database
+func addToDatabase(db *sql.DB, domain, ip string) error {
+	_, err := db.Exec("INSERT INTO resolutions(domain, ip) VALUES(?, ?)", domain, ip)
+	return err
+}
