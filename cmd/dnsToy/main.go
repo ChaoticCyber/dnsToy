@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"database/sql"
+	"flag"
 	"fmt"
 	"log"
 	"net"
@@ -16,7 +17,17 @@ import (
 	"github.com/miekg/dns"
 )
 
-var enableDNSLookup = true // Default is set to enable DNS lookup
+var (
+	enableDNSLookup = true // Default is set to enable DNS lookup
+	upstreamDNS     string // Variable to hold the upstream DNS server address
+	useGUI          bool   // Variable to determine GUI mode
+)
+
+func init() {
+	flag.StringVar(&upstreamDNS, "dns", "8.8.8.8", "Specify the upstream DNS server")
+	flag.BoolVar(&useGUI, "gui", false, "Run the application with GUI")
+	flag.Parse()
+}
 
 func main() {
 	// Open SQLite database for DNS resolutions
@@ -50,31 +61,6 @@ func main() {
 				// Check the type of DNS query
 				if question.Qtype != dns.TypeA {
 					// If it's not a query for A records, ignore and continue to the next query
-					continue
-				}
-				// Perform the DNS resolution to get the IP address
-				ips, err := net.LookupIP(question.Name)
-				if err != nil {
-					log.Printf("Error resolving %s: %s\n", question.Name, err)
-					continue
-				}
-
-				// Take the first resolved IP address
-				var resolvedIP net.IP
-				if len(ips) > 0 {
-					resolvedIP = ips[0]
-				}
-
-				// Perform database update with the client's IP address
-				exists, err := dbfunc.ExistsInDatabaseIncrementCount(database, strings.ToLower(question.Name), resolvedIP)
-				if err != nil {
-					log.Printf("Error checking database or incrementing count for %s: %s\n", question.Name, err)
-					continue
-				}
-				if !exists {
-					// If domain doesn't exist and was inserted, respond with empty response
-					// Log received A record DNS queries
-					fmt.Printf("New domain added to the database: %s\n", question.Name)
 					continue
 				}
 

@@ -20,9 +20,6 @@ func GetFromDatabase(db *sql.DB, domain string) (string, bool) {
 		log.Println(err)
 		return "", false
 	}
-
-	// Increment the query count for the domain
-	db.Exec("UPDATE resolutions SET query_count=query_count+1 WHERE domain=?", domain)
 	return resolvedIP, true // Domain found in database
 }
 
@@ -42,7 +39,6 @@ func ResolveAndStore(db *sql.DB, domain string) (net.IP, error) {
 
 	// Store the resolved IP in the database
 	err = AddToDatabase(db, domain, resolvedIP.String())
-	db.Exec("UPDATE resolutions SET query_count=query_count+1 WHERE domain=?", domain)
 	if err != nil {
 		return nil, err
 	}
