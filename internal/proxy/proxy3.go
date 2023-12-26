@@ -10,7 +10,6 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
-	"text/tabwriter"
 
 	_ "github.com/mattn/go-sqlite3"
 	"github.com/miekg/dns"
@@ -228,11 +227,10 @@ func dumpDatabase(db *sql.DB) error {
 	}
 	defer rows.Close()
 
-	// Create a tabwriter with padding and formatting for a neat table
-	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', tabwriter.TabIndent)
-
 	// Print the table header
-	fmt.Fprintln(w, "DOMAIN\t\tIP\t\tQUERY COUNT")
+	fmt.Println("\nDatabase contents:")
+	fmt.Printf("%-40s%-30s%-30s\n", "DOMAIN", "IP", "QUERY COUNT")
+	fmt.Println("---------------------------------------------------------------------------------")
 
 	// Iterate through database rows and print each row in the table
 	for rows.Next() {
@@ -241,11 +239,8 @@ func dumpDatabase(db *sql.DB) error {
 		if err := rows.Scan(&domain, &ip, &queryCount); err != nil {
 			return err
 		}
-		fmt.Fprintf(w, "%s\t\t%s\t\t%d\n", domain, ip, queryCount)
+		fmt.Printf("%-40s%-30s%-30d\n", domain, ip, queryCount)
 	}
-
-	// Flush the tabwriter and display the formatted table
-	w.Flush()
 	return nil
 }
 
