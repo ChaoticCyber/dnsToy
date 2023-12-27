@@ -103,7 +103,7 @@ func main() {
 				} else {
 					IP, err := DnsLookup(writer, request, question.Name)
 					if err != nil {
-						log.Printf("Error resolving the domain: %s\n", err)
+						log.Println(err)
 					} else {
 						fmt.Println("A new domain called: ", question.Name, "was added to the database with an IP Address of:", IP)
 						err := dbfunc.AddToDatabase(database, question.Name, IP)
