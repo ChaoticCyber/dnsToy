@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"database/sql"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -34,6 +35,11 @@ func init() {
 	flag.Parse()
 }
 
+// CustomError creates a custom error message
+func CustomError(message string) error {
+	return errors.New(fmt.Sprintf("Custom Error: %s", message))
+}
+
 func main() {
 	// Open SQLite database for DNS resolutions
 	database, err := sql.Open("sqlite3", "dns.db")
@@ -57,6 +63,14 @@ func main() {
 	//	return
 	//}
 
+	// Start the DNS server
+	go func() {
+		fmt.Println("Starting DNS server...")
+		if err := dnsServer.ListenAndServe(); err != nil {
+			log.Fatalf("Error starting DNS server: %s\n", err)
+		}
+	}()
+
 	go handleUserInput(database)
 
 	// Handle DNS requests
@@ -70,16 +84,13 @@ func main() {
 			// Check if DNS lookup is enabled or if the domain is in the database
 			if enableDNSLookup {
 				// Check the type of DNS query
-				fmt.Printf("DNS Lookup Enabled\n")
 				if question.Qtype != dns.TypeA {
 					// If it's not a query for A records, ignore and continue to the next query
-					fmt.Printf("DNS Record is not an A record\n")
 					continue
 				}
 				// Check if the queried domain exists in the resolutions database
 				if resolvedIP, found := dbfunc.GetFromDatabase(database, strings.ToLower(question.Name)); found {
 					// If found in resolutions, reply with the resolved IP
-					fmt.Printf("The queried domain exists in the DB\n")
 					ip := net.ParseIP(resolvedIP)
 					if ip != nil {
 						// Add the resolved IP to the DNS response as an A record
@@ -90,100 +101,23 @@ func main() {
 						response.Answer = append(response.Answer, &answerRecord)
 					}
 				} else {
-
-					// If not found in the local database, forward the query to the upstream DNS server
-					c := new(dns.Client)
-
-					// Create a DNS message for PTR lookup
-					mPtr := new(dns.Msg)
-					mPtr.SetQuestion("8.8.8.8.in-addr.arpa.", dns.TypePTR) // PTR query for 8.8.8.8
-
-					// Specify the DNS server to query (8.8.8.8 in this example)
-					server := upstreamDNS
-
-					// Send the PTR query
-					respPtr, _, err := c.Exchange(mPtr, server)
+					IP, err := DnsLookup(writer, request, question.Name)
 					if err != nil {
-						log.Fatalf("Error querying PTR record: %s", err)
-					}
-					targetName := question.Name
-					// Use the obtained target name (if available) for the subsequent query (A record in this example)
-					if targetName != "" {
-						mA := new(dns.Msg)
-						mA.SetQuestion(targetName, dns.TypeA) // A record query for the obtained name
-
-						// Send the A record query
-						respA, _, err := c.Exchange(mA, server)
-						if err != nil {
-							log.Fatalf("Error querying A record: %s", err)
-						}
-
-						// Extract the first IP address from the answer section
-						var ipAddress string
-						for _, ans := range respA.Answer {
-							if a, ok := ans.(*dns.A); ok {
-								fmt.Println("BeforeString")
-								ipAddress = a.A.String()
-								answerRecord := dns.A{
-									Hdr: dns.RR_Header{Name: question.Name, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 60},
-									A:   a.A,
-								}
-								response.Answer = append(response.Answer, &answerRecord)
-								break // Stop after finding the first A record
-							}
-						}
-						// Display the first IP address found
-						if ipAddress != "" {
-							fmt.Println(targetName)
-							fmt.Println("The queried domain does NOT exist; adding", targetName, "to the DB with IP: ", ipAddress)
-							err := dbfunc.AddToDatabase(database, question.Name, ipAddress)
-							if err != nil {
-								log.Printf("Error storing resolved IP in database: %s\n", err)
-							}
-						} else {
-							fmt.Println("No A record found in the response")
-						}
+						log.Printf("Error resolving the domain: %s\n", err)
 					} else {
-						log.Println("PTR record did not return a valid target name")
-
-						//fmt.Printf("The queried domain does NOT exist in the DB\n")
-
-						// Extract and store the response from upstream to the local database
-						for _, answer := range respPtr.Answer {
-							if recordA, ok := answer.(*dns.A); ok {
-								ip := recordA.A
-								// Store the resolved IP in the local database
-								fmt.Printf("The queried domain does NOT exist; adding it to the DB")
-								err := dbfunc.AddToDatabase(database, recordA.Hdr.Name, ip.String())
-								if err != nil {
-									log.Printf("Error storing resolved IP in database: %s\n", err)
-								}
-								// Add the resolved IP to the DNS response as an A record
-								answerRecord := dns.A{
-									Hdr: dns.RR_Header{Name: question.Name, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 60},
-									A:   ip,
-								}
-								response.Answer = append(response.Answer, &answerRecord)
-							}
+						fmt.Println("A new domain called: ", question.Name, "was added to the database with an IP Address of:", IP)
+						err := dbfunc.AddToDatabase(database, question.Name, IP)
+						if err != nil {
+							log.Printf("Error storing resolved IP in database: %s\n", err)
 						}
-
-						// 	resolvedIP, err := dbfunc.ResolveAndStore(database, strings.ToLower(question.Name))
-						// 	if err != nil {
-						// 		log.Printf("Error resolving and storing: %s\n", err)
-						// 		continue
-						// 	}
-						// 	if resolvedIP != nil {
-						// 		// Add the resolved IP to the DNS response as an A record
-						// 		answerRecord := dns.A{
-						// 			Hdr: dns.RR_Header{Name: question.Name, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 60},
-						// 			A:   resolvedIP,
-						// 		}
-						// 		response.Answer = append(response.Answer, &answerRecord)
-						// 	}
 					}
 				}
 			}
 			if !enableDNSLookup {
+				if question.Qtype != dns.TypeA {
+					// If it's not a query for A records, ignore and continue to the next query
+					continue
+				}
 				// If DNS lookup is disabled, check if domain exists in the database
 				fmt.Printf("Lookups disabled, checking database.\n")
 				if resolvedIP, found := dbfunc.GetFromDatabase(database, strings.ToLower(question.Name)); found {
@@ -202,20 +136,13 @@ func main() {
 				}
 			}
 		}
+
 		// Send the DNS response back to the client
 		err := writer.WriteMsg(response)
 		if err != nil {
 			log.Printf("Error writing DNS response: %s\n", err)
 		}
 	})
-
-	// Start the DNS server
-	go func() {
-		fmt.Println("Starting DNS server...")
-		if err := dnsServer.ListenAndServe(); err != nil {
-			log.Fatalf("Error starting DNS server: %s\n", err)
-		}
-	}()
 
 	// Wait for interruption to stop the server (Ctrl+C)
 	signalChannel := make(chan os.Signal, 1)
@@ -256,7 +183,7 @@ func handleUserInput(db *sql.DB) {
 }
 
 func setDNS(serverIP string) error {
-	cmd := exec.Command("netsh", "interface", "ipv4", "set", "dns", "name=Ethernet", "static", serverIP)
+	cmd := exec.Command("netsh", "interface", "ipv4", "add", "dnsserver", "name=Ethernet", "address=127.0.0.1", "index=1", serverIP)
 	err := cmd.Run()
 	if err != nil {
 		return fmt.Errorf("error setting DNS: %s", err)
@@ -265,10 +192,80 @@ func setDNS(serverIP string) error {
 }
 
 func revertDNS() error {
-	cmd := exec.Command("netsh", "interface", "ipv4", "set", "dns", "name=Ethernet", "dhcp")
+	cmd := exec.Command("netsh", "interface", "ip", "set", "dns", "name=Ethernet", "dhcp")
 	err := cmd.Run()
 	if err != nil {
 		return fmt.Errorf("error reverting DNS: %s", err)
 	}
 	return nil
+}
+
+func DnsLookup(w dns.ResponseWriter, response *dns.Msg, domain string) (string, error) {
+	c := new(dns.Client)
+	// Create a DNS message for PTR lookup
+	mPtr := new(dns.Msg)
+	mPtr.SetQuestion("8.8.8.8.in-addr.arpa.", dns.TypePTR) // PTR query for 8.8.8.8
+	// Specify the DNS server to query (8.8.8.8 in this example)
+	server := upstreamDNS
+	// Send the PTR query
+	respPtr, _, err := c.Exchange(mPtr, server)
+	if err != nil {
+		log.Fatalf("Error querying PTR record: %s", err)
+	}
+	targetName := domain
+	// Use the obtained target name (if available) for the subsequent query (A record in this example)
+	var ipAddress string
+	if targetName != "" {
+		mA := new(dns.Msg)
+		mA.SetQuestion(targetName, dns.TypeA) // A record query for the obtained name
+		// Send the A record query
+		respA, _, err := c.Exchange(mA, server)
+		if err != nil {
+			log.Fatalf("Error querying A record: %s", err)
+		}
+		//Extract the first IP address from the answer section
+		for _, ans := range respA.Answer {
+			if a, ok := ans.(*dns.A); ok {
+				ipAddress = a.A.String()
+				answerRecord := dns.A{
+					Hdr: dns.RR_Header{Name: domain, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 60},
+					A:   a.A,
+				}
+				response.Answer = append(response.Answer, &answerRecord)
+				if len(ipAddress) > 0 {
+					break // Stop after finding the first A record
+
+				} else {
+					fmt.Errorf("no IP addresses found for %s", domain)
+				}
+
+			}
+		}
+		for _, answer := range respPtr.Answer {
+			if recordA, ok := answer.(*dns.A); ok {
+				ip := recordA.A
+				if err != nil {
+					log.Printf("Error storing resolved IP in database: %s\n", err)
+				}
+				// Add the resolved IP to the DNS response as an A record
+				answerRecord := dns.A{
+					Hdr: dns.RR_Header{Name: domain, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 60},
+					A:   ip,
+				}
+				response.Answer = append(response.Answer, &answerRecord)
+				if len(ip) > 0 {
+					break // Stop after finding the first A record
+
+				} else {
+					fmt.Errorf("2no IP addresses found for %s", domain)
+				}
+			}
+		}
+	} else {
+		fmt.Println("Target was blank")
+	}
+	if len(ipAddress) == 0 {
+		return ipAddress, CustomError("No IP address returned for the domain")
+	}
+	return ipAddress, nil
 }

@@ -53,6 +53,7 @@ func ResolveAndStore(db *sql.DB, domain string) (net.IP, error) {
 // Function to add a domain and its resolution to the database
 func AddToDatabase(db *sql.DB, domain, ip string) error {
 	_, err := db.Exec("INSERT INTO resolutions(domain, ip) VALUES(?, ?)", domain, ip)
+	db.Exec("UPDATE resolutions SET query_count=query_count+1 WHERE domain=?", domain)
 	return err
 }
 
